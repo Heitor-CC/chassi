@@ -19,10 +19,10 @@ def gerar_chassi_completo(L, h, b, r, R, E, t, peso, proporcao_banco):
     if h_eff > 1e-6:
         h_eff -= (2*r)
 
-    L_lat = L - (1.5 * R) - (2 * r)
-    y_X = 0.4318181818181818 * L_lat
-    reta_bico = 0.580574 * E
-    bico_eff = (b_eff / 3.0) + r
+    L_lat = L - (1.5 * R) - (2 * r)      # longarinas
+    y_X = 0.4318181818181818 * L_lat    # posição de inicio do X
+    reta_bico = 0.580574 * E 
+    bico_eff = (b_eff / 3.0) + r    # parte reta da ponta do bico
 
     x_ext = b_eff / 2.0
     x_bico = bico_eff / 2.0
