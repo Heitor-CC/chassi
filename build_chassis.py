@@ -8,228 +8,242 @@ import regionToolset
 import numpy as np
 
 
-def gerar_chassi_completo(L, h, b, r, R, E, t, peso, proporcao_banco):
+class GerarModeloChassi():
+    def __init__(self, L, h, b, r, t, R, E, peso, proporcao_banco, angulo_curva_bico=30):
+        k = 0.01
+        self.L = L*k
+        self.h = h*k
+        self.b = b*k
+        self.r = r*k
+        self.t = t*k
+        self.R = R*k
+        self.E = E*k
+        self.peso = peso
+        self.proporcao_banco = proporcao_banco
+        self.angulo_bico = angulo_curva_bico
 
-    # ==========================================================
-    # calculo das medidas
-    # ==========================================================
-    b_eff = b - (2 * r)
+        self.meu_modelo = mdb.models['Model-1']
 
-    h_eff = h
-    if h_eff > 1e-6:
-        h_eff -= (2*r)
+    def criar_material_base(self):
+        if 'PVC' not in self.meu_modelo.materials:
+            meu_material = self.meu_modelo.Material(name='PVC')
+            meu_material.Elastic(table=((3e9, 0.38), ))
+            meu_material.Plastic(table=((52000000.0, 0.0), ))
+            meu_material.Density(table=((1400.0, ), ))
 
-    L_lat = L - (1.5 * R) - (2 * r)      # longarinas
-    y_X = 0.4318181818181818 * L_lat    # posição de inicio do X
-    reta_bico = 0.580574 * E 
-    bico_eff = (b_eff / 3.0) + r    # parte reta da ponta do bico
+        nome_perfil = 'Perfil_Tubo_R' + str(self.r)
+        if nome_perfil not in self.meu_modelo.profiles:
+            self.meu_modelo.PipeProfile(name=nome_perfil, r=self.r, t=self.t)
 
-    x_ext = b_eff / 2.0
-    x_bico = bico_eff / 2.0
+        if 'secao_chassi' not in self.meu_modelo.sections:
+            self.meu_modelo.BeamSection(name='secao_chassi', integration=DURING_ANALYSIS,
+                                        poissonRatio=0.3, profile=nome_perfil,
+                                        material='PVC', temperatureVar=LINEAR)
 
-    comp_y_diagonal = L - (L_lat + reta_bico) - (2*r)
-    # ==========================================================
-    # definição dos pontos
-    # ==========================================================
-    pt_tras_esq = (-x_ext, 0.0, 0.0)
-    pt_tras_dir = (x_ext, 0.0, 0.0)
-    pt_lat_esq = (-x_ext, L_lat, 0.0)
-    pt_lat_dir = (x_ext, L_lat, 0.0)
-    pt_x_esq_inicio = (-x_ext, y_X, 0.0)
-    pt_x_dir_inicio = (x_ext, y_X, 0.0)
-    pt_alto_esq = (-x_ext, L_lat, h_eff)
-    pt_alto_dir = (x_ext, L_lat, h_eff)
-    y_reta = L_lat + reta_bico
-    pt_reta_esq = (-x_ext, y_reta, h_eff)
-    pt_reta_dir = (x_ext, y_reta, h_eff)
-    y_frente = y_reta + comp_y_diagonal
-    pt_bico_esq = (-x_bico, y_frente, h_eff)
-    pt_bico_dir = (x_bico, y_frente, h_eff)
+    def geometria(self):
 
-    # ==========================================================
-    # 3. construção do wire
-    # ==========================================================
-    meu_modelo = mdb.models['Model-1']
+        # medidas do chassi
+        # qualquer cálculo com (2*r) é a compensação gerada pelo raio do chassi. (Necessário pelo modelo wire)
 
-    if 'chassi_parametrizado' in meu_modelo.parts:
-        del meu_modelo.parts['chassi_parametrizado']
+        b_eff = self.b - (2 * self.r)     # largura
+        h_eff = self.h               # altura da haste
 
-    minha_part = meu_modelo.Part(
-        name='chassi_parametrizado', dimensionality=THREE_D, type=DEFORMABLE_BODY)
+        if h_eff > 1e-6:
+            # faz a compensação depois de verificar que h != 0
+            h_eff -= (2*self.r)
 
-    # lista de barras
-    linhas_wire = [
-        (pt_tras_esq, pt_tras_dir),
-        (pt_tras_esq, pt_lat_esq),
-        (pt_tras_dir, pt_lat_dir),
-        (pt_x_esq_inicio, pt_lat_dir),
-        (pt_x_dir_inicio, pt_lat_esq),
-        (pt_reta_esq, pt_bico_esq),
-        (pt_reta_dir, pt_bico_dir),
-        (pt_bico_esq, pt_bico_dir)
-    ]
+        self.L_lat = self.L - (1.5 * self.R) - (2 * self.r)      # longarinas
+        # 4.1818... foi constante encontrada nos cálculos (pode ser alterada para deslocar o X)
+        self.y_X = 0.4318181818181818 * self.L_lat
+        # reta lateral do bico. Constante também encontrada empiricamente
+        reta_bico = 0.580574 * self.E
 
-    # se a altura for maior q zero, desenha o degrau
-    if h_eff > 1e-6:
-        linhas_wire.extend([
-            (pt_lat_esq, pt_alto_esq),
-            (pt_lat_dir, pt_alto_dir),
-            (pt_alto_esq, pt_reta_esq),
-            (pt_alto_dir, pt_reta_dir)
-        ])
-    else:
-        linhas_wire.extend([
-            (pt_lat_esq, pt_reta_esq),
-            (pt_lat_dir, pt_reta_dir)
-        ])
+        # largura da base, simplesmente pra facilitar os calculos
+        self.x_ext = b_eff / 2.0
+        comp_y_diagonal = self.L - (self.L_lat + reta_bico) - (2*self.r)
 
-    # Passa a lista dinâmica para o Abaqus desenhar
-    minha_part.WirePolyLine(points=tuple(linhas_wire),
-                            mergeType=IMPRINT, meshable=ON)
+        delta_x = comp_y_diagonal / np.tan(np.deg2rad(self.angulo_bico))
 
-    # ==========================================================
-    # cria um material pra conseguir criar a seção, e depois a seção
-    # ==========================================================
-    if 'PVC' not in meu_modelo.materials:
-        meu_material = meu_modelo.Material(name='PVC')
-        meu_material.Elastic(table=((3e9, 0.38), ))
-        meu_material.Plastic(table=((52000000.0, 0.0), ))
-        meu_material.Density(table=((1400.0, ), ))
+        # O x do bico será a borda externa menos a variação lateral
+        x_bico = self.x_ext - delta_x
 
-    nome_perfil = 'Perfil_Tubo_R' + str(r)
-    if nome_perfil not in meu_modelo.profiles:
-        meu_modelo.PipeProfile(name=nome_perfil, r=r, t=t)
+        # ==========================================================
+        # definição dos pontos
+        # ==========================================================
+        y_reta = self.L_lat + reta_bico
+        y_frente = y_reta + comp_y_diagonal
 
-    if 'secao_chassi' not in meu_modelo.sections:
-        meu_modelo.BeamSection(name='secao_chassi', integration=DURING_ANALYSIS,
-                               poissonRatio=0.3, profile=nome_perfil,
-                               material='PVC', temperatureVar=LINEAR)
+        # serão utilizados para engaste
+        self.pt_tras_esq = (-self.x_ext, 0.0, 0.0)
+        self.pt_tras_dir = (self.x_ext, 0.0, 0.0)
+        self.pt_bico_esq = (-x_bico, y_frente, h_eff)
+        self.pt_bico_dir = (x_bico, y_frente, h_eff)
 
-    # ==========================================
-    # orientação dos fios
-    # ==========================================
-    todas_arestas = minha_part.edges
-    regiao_chassi = minha_part.Set(edges=todas_arestas, name='Todo_o_Chassi')
-    minha_part.SectionAssignment(
-        region=regiao_chassi, sectionName='secao_chassi')
+        pt_lat_esq = (-self.x_ext, self.L_lat, 0.0)
+        pt_lat_dir = (self.x_ext, self.L_lat, 0.0)
+        pt_x_esq_inicio = (-self.x_ext, self.y_X, 0.0)
+        pt_x_dir_inicio = (self.x_ext, self.y_X, 0.0)
+        pt_alto_esq = (-self.x_ext, self.L_lat, h_eff)
+        pt_alto_dir = (self.x_ext, self.L_lat, h_eff)
 
-    arestas_verticais, arestas_horizontais = [], []
-    for aresta in todas_arestas:
-        v1 = minha_part.vertices[aresta.getVertices()[0]].pointOn[0]
-        v2 = minha_part.vertices[aresta.getVertices()[1]].pointOn[0]
-        dz = abs(v1[2] - v2[2])
-        dx = abs(v1[0] - v2[0])
-        dy = abs(v1[1] - v2[1])
+        pt_reta_esq = (-self.x_ext, y_reta, h_eff)
+        pt_reta_dir = (self.x_ext, y_reta, h_eff)
 
-        if dz > (dx + dy):
-            arestas_verticais.append(aresta)
+        # ================================================================
+        # Construção do wire
+
+        if 'chassi_parametrizado' in self.meu_modelo.parts:
+            del self.meu_modelo.parts['chassi_parametrizado']
+
+        self.minha_part = self.meu_modelo.Part(
+            name='chassi_parametrizado', dimensionality=THREE_D, type=DEFORMABLE_BODY)
+
+        # lista de barras
+        linhas_wire = [
+            (self.pt_tras_esq, self.pt_tras_dir),
+            (self.pt_tras_esq, pt_lat_esq),
+            (self.pt_tras_dir, pt_lat_dir),
+            (pt_x_esq_inicio, pt_lat_dir),
+            (pt_x_dir_inicio, pt_lat_esq),
+            (pt_reta_esq, self.pt_bico_esq),
+            (pt_reta_dir, self.pt_bico_dir),
+            (self.pt_bico_esq, self.pt_bico_dir)
+        ]
+
+        # se a altura for maior q zero, desenha o degrau
+        if h_eff > 1e-6:
+            linhas_wire.extend([
+                (pt_lat_esq, pt_alto_esq),
+                (pt_lat_dir, pt_alto_dir),
+                (pt_alto_esq, pt_reta_esq),
+                (pt_alto_dir, pt_reta_dir)
+            ])
         else:
-            arestas_horizontais.append(aresta)
+            linhas_wire.extend([
+                (pt_lat_esq, pt_reta_esq),
+                (pt_lat_dir, pt_reta_dir)
+            ])
 
-    if arestas_horizontais:
-        reg_horiz = minha_part.Set(edges=part.EdgeArray(
-            arestas_horizontais), name='Arestas_Horizontais')
-        minha_part.assignBeamSectionOrientation(
-            region=reg_horiz, method=N1_COSINES, n1=(0.0, 0.0, -1.0))
+        # desenha o wire
+        self.minha_part.WirePolyLine(points=tuple(
+            linhas_wire),  mergeType=IMPRINT, meshable=ON)
 
-    if arestas_verticais:
-        reg_vert = minha_part.Set(edges=part.EdgeArray(
-            arestas_verticais), name='Arestas_Verticais')
-        minha_part.assignBeamSectionOrientation(
-            region=reg_vert, method=N1_COSINES, n1=(1.0, 0.0, 0.0))
+        # ==========================================
+        # orientação dos fios
+        # ==========================================
 
-    # ==========================================
-    # 6. MALHA (B31)
-    # ==========================================
-    tipo_elemento = mesh.ElemType(elemCode=B31, elemLibrary=STANDARD)
-    minha_part.setElementType(regions=regiao_chassi,
-                              elemTypes=(tipo_elemento,))
-    minha_part.seedPart(size=0.02, deviationFactor=0.1, minSizeFactor=0.1)
-    minha_part.generateMesh()
+        self.criar_material_base()
 
-    # ==========================================
-    # 7. assembly, ponto de referência, acoplamento, carga e condições de contorno
-    # ==========================================
-    meu_assembly = meu_modelo.rootAssembly
-    meu_assembly.DatumCsysByDefault(CARTESIAN)
+        todas_arestas = self.minha_part.edges
 
-    if 'Chassi' in meu_assembly.instances:
-        del meu_assembly.instances['Chassi']
+        self.regiao_chassi = self.minha_part.Set(
+            edges=todas_arestas, name='Todo_o_Chassi')
+        self.minha_part.SectionAssignment(
+            region=self.regiao_chassi, sectionName='secao_chassi')
 
-    instancia = meu_assembly.Instance(
-        name='Chassi', part=minha_part, dependent=ON)
+        arestas_verticais, arestas_horizontais = [], []
+        for aresta in todas_arestas:
+            v1 = self.minha_part.vertices[aresta.getVertices()[0]].pointOn[0]
+            v2 = self.minha_part.vertices[aresta.getVertices()[1]].pointOn[0]
+            dz = abs(v1[2] - v2[2])
+            dx = abs(v1[0] - v2[0])
+            dy = abs(v1[1] - v2[1])
 
-    # ponto da carga
+            if dz > (dx + dy):
+                arestas_verticais.append(aresta)
+            else:
+                arestas_horizontais.append(aresta)
 
-    y_rp = L_lat * proporcao_banco
-    coord_rp = (0.0, y_rp, h)
+        if arestas_horizontais:
+            reg_horiz = self.minha_part.Set(edges=part.EdgeArray(
+                arestas_horizontais), name='Arestas_Horizontais')
+            self.minha_part.assignBeamSectionOrientation(
+                region=reg_horiz, method=N1_COSINES, n1=(0.0, 0.0, -1.0))
 
-    rp_feature = meu_assembly.ReferencePoint(point=coord_rp)
-    rp_id = rp_feature.id
-    regiao_rp = meu_assembly.Set(referencePoints=(
-        meu_assembly.referencePoints[rp_id],), name='Set_RP_Carga')
+        if arestas_verticais:
+            reg_vert = self.minha_part.Set(edges=part.EdgeArray(
+                arestas_verticais), name='Arestas_Verticais')
+            self.minha_part.assignBeamSectionOrientation(
+                region=reg_vert, method=N1_COSINES, n1=(1.0, 0.0, 0.0))
 
-    # Busca a barra lateral em dois pontos (antes e depois do x cruzar a barra)
-    # Ponto 1: Metade do caminho antes do X
-    y_busca_1 = y_X / 2.0
-    # Ponto 2: Metade do caminho entre o X e a dobra da haste vertical
-    y_busca_2 = y_X + ((L_lat - y_X) / 2.0)
+    def gerar_malha(self):
+        tipo_elemento = mesh.ElemType(elemCode=B31, elemLibrary=STANDARD)
+        self.minha_part.setElementType(
+            regions=self.regiao_chassi, elemTypes=(tipo_elemento,))
+        self.minha_part.seedPart(
+            size=0.02, deviationFactor=0.1, minSizeFactor=0.1)
+        self.minha_part.generateMesh()
 
-    # Encontra os pedaços da esquerda
-    aresta_esq_1 = instancia.edges.findAt(((-x_ext, y_busca_1, 0.0),))
-    aresta_esq_2 = instancia.edges.findAt(((-x_ext, y_busca_2, 0.0),))
+    def assembly(self):
+        self.meu_assembly = self.meu_modelo.rootAssembly
+        self.meu_assembly.DatumCsysByDefault(CARTESIAN)
 
-    # Encontra os pedaços da direita
-    aresta_dir_1 = instancia.edges.findAt(((x_ext, y_busca_1, 0.0),))
-    aresta_dir_2 = instancia.edges.findAt(((x_ext, y_busca_2, 0.0),))
+        if 'Chassi' in self.meu_assembly.instances:
+            del self.meu_assembly.instances['Chassi']
 
-    # Soma todos os pedaços encontrados para formar as barras inteiras
-    regiao_laterais = meu_assembly.Set(
-        edges=aresta_esq_1 + aresta_esq_2 + aresta_dir_1 + aresta_dir_2,
-        name='Set_Barras_Laterais')
+        self.instancia = self.meu_assembly.Instance(
+            name='Chassi', part=self.minha_part, dependent=ON)
 
-    meu_modelo.Coupling(name='Acoplamento_Peso', controlPoint=regiao_rp, surface=regiao_laterais,
-                        influenceRadius=WHOLE_SURFACE, couplingType=DISTRIBUTING, weightingMethod=UNIFORM)
+    def carga_engaste(self):
+        y_rp = self.L_lat * self.proporcao_banco
+        coord_rp = (0.0, y_rp, self.h)
 
-    if 'Step-Carga' not in meu_modelo.steps:
-        meu_modelo.StaticStep(name='Step-Carga', previous='Initial', nlgeom=ON)
+        rp_feature = self.meu_assembly.ReferencePoint(point=coord_rp)
+        rp_id = rp_feature.id
+        regiao_rp = self.meu_assembly.Set(referencePoints=(
+            self.meu_assembly.referencePoints[rp_id],), name='Set_RP_Carga')
 
-    peso_crianca = peso * -9.81
-    meu_modelo.ConcentratedForce(
-        name='Peso_Crianca', createStepName='Step-Carga', region=regiao_rp, cf3=peso_crianca)
+        # Busca a barra lateral em dois pontos (antes e depois do x cruzar a barra)
+        # Ponto 1: Metade do caminho antes do X
+        y_busca_1 = self.y_X / 2.0
+        # Ponto 2: Metade do caminho entre o X e a dobra da haste vertical
+        y_busca_2 = self.y_X + ((self.L_lat - self.y_X) / 2.0)
 
-    vertices_engaste = instancia.vertices.findAt(
-        (pt_tras_esq,),
-        (pt_tras_dir,),
-        (pt_bico_esq,),
-        (pt_bico_dir,)
-    )
+        # Encontra os pedaços da esquerda
+        aresta_esq_1 = self.instancia.edges.findAt(
+            ((-self.x_ext, y_busca_1, 0.0),))
+        aresta_esq_2 = self.instancia.edges.findAt(
+            ((-self.x_ext, y_busca_2, 0.0),))
 
-    regiao_apoios = meu_assembly.Set(vertices=vertices_engaste, name='apoios')
-    meu_modelo.DisplacementBC(name='engaste', createStepName='Initial', region=regiao_apoios,
-                              u1=SET, u2=SET, u3=SET, ur1=SET, ur2=SET, ur3=SET)
+        # Encontra os pedaços da direita
+        aresta_dir_1 = self.instancia.edges.findAt(
+            ((self.x_ext, y_busca_1, 0.0),))
+        aresta_dir_2 = self.instancia.edges.findAt(
+            ((self.x_ext, y_busca_2, 0.0),))
 
-    print("Modelo 100% configurado! Geometria, RP, Carga e Malha gerados dinamicamente.")
+        # Soma todos os pedaços encontrados para formar as barras inteiras
+        regiao_laterais = self.meu_assembly.Set(
+            edges=aresta_esq_1 + aresta_esq_2 + aresta_dir_1 + aresta_dir_2,
+            name='Set_Barras_Laterais')
+
+        self.meu_modelo.Coupling(name='Acoplamento_Peso', controlPoint=regiao_rp, surface=regiao_laterais,
+                                 influenceRadius=WHOLE_SURFACE, couplingType=DISTRIBUTING, weightingMethod=UNIFORM)
+
+        if 'Step-Carga' not in self.meu_modelo.steps:
+            self.meu_modelo.StaticStep(
+                name='Step-Carga', previous='Initial', nlgeom=ON)
+
+        peso_crianca = self.peso * -9.81
+
+        self.meu_modelo.ConcentratedForce(
+            name='Peso_Crianca', createStepName='Step-Carga', region=regiao_rp, cf3=peso_crianca)
+
+        vertices_engaste = self.instancia.vertices.findAt(
+            (self.pt_tras_esq,),
+            (self.pt_tras_dir,),
+            (self.pt_bico_esq,),
+            (self.pt_bico_dir,)
+        )
+
+        regiao_apoios = self.meu_assembly.Set(
+            vertices=vertices_engaste, name='apoios')
+        self.meu_modelo.DisplacementBC(name='engaste', createStepName='Initial', region=regiao_apoios,
+                                       u1=SET, u2=SET, u3=SET, ur1=SET, ur2=SET, ur3=SET)
 
 
-# ==============================================================================================================================
-# medidas físicas do chassi
-# ==============================================================================================================================
-L = 53.7         # distância entre eixos
-h = 15   # altura da haste da roda
-b = 38    # largura
-R = 11    # raio da roda
-E = 15.5        # distância entre o eixo frontal e a extremidade da roda mais próxima ao centro
-
-r = 1.0     # raio da seção transversal
-t = 0.15   # espessura da seção transversal (para o perfil tubular)
-
-peso = 50  # peso da criança (em kg)
-
-# distância (em porcentagem) do eixo traseiro até o ponto onde o peso é aplicado na barra lateral
-proporcao_banco = 0.5
-
-variaveis = np.array([L, h, b, r, R, E, t])
-variaveis *= 0.01  # Converte para metros
-
-gerar_chassi_completo(*variaveis, peso=peso, proporcao_banco=proporcao_banco)
+chassi_1 = GerarModeloChassi(
+    L=53.7, h=15, b=38, r=1.0, t=0.15, R=11, E=15.5, peso=50, proporcao_banco=0.5)
+chassi_1.geometria()
+chassi_1.gerar_malha()
+chassi_1.assembly()
+chassi_1.carga_engaste()
