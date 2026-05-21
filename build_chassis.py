@@ -242,7 +242,8 @@ class GerarModeloChassi():
 
 
 chassi_1 = GerarModeloChassi(
-    L=53.7, h=15, b=38, r=1.0, t=0.15, R=11, E=15.5, peso=50, proporcao_banco=0.5)
+    L=53.5, h=15, b=41, r=1.0, t=0.15, R=11, E=15.5, peso=50, proporcao_banco=0.5)
+
 chassi_1.geometria()
 chassi_1.gerar_malha()
 chassi_1.assembly()
