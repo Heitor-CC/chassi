@@ -9,20 +9,17 @@ import numpy as np
 
 
 class GerarModeloChassi():
-    def __init__(self, L, h, b, D, t, R, peso, proporcao_banco, nome, angulo_curva_bico=45, comp_joelho_cm=3.5):
+    def __init__(self, L, h, b, D, t, R, peso, proporcao_banco, nome, comp_joelho_cm, angulo_curva_bico=45):
         k = 0.01
         self.L = L*k
         self.h = h*k
         self.b = b*k
         self.D = D*k
         self.t = t*k
-
-        # R representa o raio da roda do carrinho
         self.R = R*k
 
-        # A medida E substitui a antiga constante empírica, utilizando L, R e a folga fixa de 1 cm
+        # folga fixa de 1 cm
         self.folga = 1.0 * k
-        self.E = self.L - self.R - self.folga
 
         self.peso = peso
         self.proporcao_banco = proporcao_banco
@@ -35,7 +32,6 @@ class GerarModeloChassi():
             self.meu_modelo = mdb.Model(name=nome)
         else:
             self.meu_modelo = mdb.models[nome]
-       
 
     def criar_material_base(self):
         if 'PVC' not in self.meu_modelo.materials:
@@ -57,54 +53,59 @@ class GerarModeloChassi():
 
         # Medidas do chassi com as compensações necessárias
 
-        b_eff = self.b - (1 * self.D) - (2 * self.comp_joelho)     # largura
-        h_eff = self.h                                             # altura da haste
+        self.b_eff = self.b - (2 * self.comp_joelho)     # largura
+        # altura da haste
+        self.h_eff = self.h
 
-        if h_eff > 1e-6:
+        if self.h_eff > 1e-6:
             # faz a compensação de raio e conexões depois de verificar que h != 0
-            h_eff -= (1 * self.D) + (2 * self.comp_joelho)
+            self.h_eff -= (2 * self.comp_joelho)
 
         # Comprimento efetivo descontando os joelhos da frente e de trás
         L_eff = self.L - (2 * self.comp_joelho)
 
-        self.L_lat = L_eff - self.R - (1 * self.D)      # longarinas
+        self.L_lat = L_eff - self.R - self.folga      # longarinas
 
         # 4.1818... foi constante encontrada nos cálculos (pode ser alterada para deslocar o X)
         self.y_X = 0.4318181818181818 * self.L_lat
 
         # reta lateral do bico utilizando o novo E calculado
-        reta_bico = 0.580574 * self.R
+        self.reta_bico = 0.580574 * self.R
 
         # largura da base, simplesmente pra facilitar os calculos
-        self.x_ext = b_eff / 2.0
-        comp_y_diagonal = L_eff - (self.L_lat + reta_bico) - (1*self.D)
+        self.x_ext = self.b_eff / 2.0
+        self.comp_y_diagonal = L_eff - (self.L_lat + self.reta_bico)
 
-        delta_x = comp_y_diagonal / np.tan(np.deg2rad(self.angulo_bico))
+        self.delta_x = self.comp_y_diagonal / \
+            np.tan(np.deg2rad(self.angulo_bico))
+
+        self.hipotenusa_bico = np.sqrt(
+            self.comp_y_diagonal**2 + self.delta_x**2)
 
         # O x do bico será a borda externa menos a variação lateral
-        x_bico = self.x_ext - delta_x
+        self.x_bico = self.x_ext - self.delta_x
 
         # ==========================================================
         # definição dos pontos
         # ==========================================================
-        y_reta = self.L_lat + reta_bico
-        y_frente = y_reta + comp_y_diagonal
+        y_reta = self.L_lat + self.reta_bico
+        y_frente = y_reta + self.comp_y_diagonal
 
         # serão utilizados para engaste
         self.pt_tras_esq = (-self.x_ext, 0.0, 0.0)
         self.pt_tras_dir = (self.x_ext, 0.0, 0.0)
-        self.pt_bico_esq = (-x_bico, y_frente, h_eff)
-        self.pt_bico_dir = (x_bico, y_frente, h_eff)
+        self.pt_bico_esq = (-self.x_bico, y_frente, self.h_eff)
+        self.pt_bico_dir = (self.x_bico, y_frente, self.h_eff)
 
         pt_lat_esq = (-self.x_ext, self.L_lat, 0.0)
         pt_lat_dir = (self.x_ext, self.L_lat, 0.0)
         pt_x_esq_inicio = (-self.x_ext, self.y_X, 0.0)
         pt_x_dir_inicio = (self.x_ext, self.y_X, 0.0)
-        pt_alto_esq = (-self.x_ext, self.L_lat, h_eff)
-        pt_alto_dir = (self.x_ext, self.L_lat, h_eff)
+        pt_alto_esq = (-self.x_ext, self.L_lat, self.h_eff)
+        pt_alto_dir = (self.x_ext, self.L_lat, self.h_eff)
 
-        pt_reta_esq = (-self.x_ext, y_reta, h_eff)
-        pt_reta_dir = (self.x_ext, y_reta, h_eff)
+        pt_reta_esq = (-self.x_ext, y_reta, self.h_eff)
+        pt_reta_dir = (self.x_ext, y_reta, self.h_eff)
 
         # ================================================================
         # Construção do wire
@@ -128,7 +129,7 @@ class GerarModeloChassi():
         ]
 
         # se a altura for maior q zero, desenha o degrau
-        if h_eff > 1e-6:
+        if self.h_eff > 1e-6:
             linhas_wire.extend([
                 (pt_lat_esq, pt_alto_esq),
                 (pt_lat_dir, pt_alto_dir),
@@ -257,6 +258,39 @@ class GerarModeloChassi():
         self.meu_modelo.DisplacementBC(name='engaste', createStepName='Initial', region=regiao_apoios,
                                        u1=SET, u2=SET, u3=SET, ur1=SET, ur2=SET, ur3=SET)
 
+    def gerar_lista_de_corte(self, cota):
+        print("\n" + "="*50)
+        print(" LISTA DE CORTE DE TUBOS | D = {:.0f}mm ".format(self.D * 1000))
+        print("="*50)
+
+        desconto = (2*cota) * 0.01  # -> passa pra metros
+
+        # 1. Base traseira
+        corte_base_tras = self.b_eff - desconto
+        print("- 1x Base Traseira: {:.1f} cm".format(corte_base_tras * 100))
+
+        # 2. Longarinas
+        corte_longarina = self.L_lat - desconto
+        print("- 2x Longarinas: {:.1f} cm".format(corte_longarina * 100))
+
+        # 3. haste do bico
+        vertical = self.h_eff - desconto
+        print("- 2x hastes do Bico: {:.1f} cm".format(vertical * 100))
+
+        # 4. Reta lateral do bico
+        corte_reta_bico = self.reta_bico - desconto
+        print("- 2x Retas do Bico: {:.1f} cm".format(corte_reta_bico * 100))
+
+        # 5. Diagonal do bico
+        corte_diagonal = self.hipotenusa_bico - desconto
+        print("- 2x Diagonais do Bico: {:.1f} cm".format(corte_diagonal * 100))
+
+        # 6. frente do bico
+        frente = self.b_eff - (2 * self.delta_x + desconto)
+        print("- 1x frente do Bico: {:.1f} cm".format(frente * 100))
+
+        print("="*50 + "\n")
+
 
 def modelar(chassi):
     chassi.geometria()
@@ -265,12 +299,10 @@ def modelar(chassi):
     chassi.carga_engaste()
 
 
-'''
-comp_joelho é definido para o joelho de 25mm, encontrado empiricamente
-
-
-'''
-
 if __name__ == '__main__':
-    chassi_1 = GerarModeloChassi(L=53.5, h=15, b=41, D=2.5, t=0.15, R=11, peso=50, proporcao_banco=0.5, nome = 'Model-1', comp_joelho_cm=3.25)
+    # valores para o carrinho bandeirante smart, com perfil tubular de 25mm
+    chassi_1 = GerarModeloChassi(L=53.5, h=15, b=41, D=2.5, t=0.15, R=11,
+                                 peso=50, proporcao_banco=0.5, nome='Model-1', comp_joelho_cm=1.69)
     modelar(chassi_1)
+
+    chassi_1.gerar_lista_de_corte(1.44)
